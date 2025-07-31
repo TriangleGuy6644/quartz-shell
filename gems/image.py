@@ -1,14 +1,9 @@
 import os
 from PIL import Image, ImageOps
 from prompt_toolkit import PromptSession
-from prompt_toolkit.completion import WordCompleter, PathCompleter, NestedCompleter
+from prompt_toolkit.completion import WordCompleter, PathCompleter
 
-TOOLS = {
-    'invert': 'Invert colors',
-    'grayscale': 'Convert to grayscale',
-    'thumbnail': 'Create a 128x128 thumbnail',
-    'rotate': 'Rotate 90 degrees clockwise',
-}
+TOOLS = ['invert', 'grayscale', 'thumbnail', 'rotate']
 
 def process_image(tool, image_path):
     if not os.path.isfile(image_path):
@@ -22,6 +17,7 @@ def process_image(tool, image_path):
         return
 
     if tool == 'invert':
+        # Support RGB and RGBA modes for invert
         if img.mode == 'RGBA':
             r, g, b, a = img.split()
             rgb_image = Image.merge("RGB", (r, g, b))
@@ -32,7 +28,6 @@ def process_image(tool, image_path):
         else:
             print("Invert only supports RGB or RGBA images.")
             return
-
         out_path = _get_output_path(image_path, 'invert')
 
     elif tool == 'grayscale':
@@ -61,19 +56,21 @@ def _get_output_path(original_path, tool_name):
 def main(args):
     session = PromptSession()
 
-    # If args given, use them; else prompt interactively
+    # Use WordCompleter for tool name autocomplete
+    tool_completer = WordCompleter(TOOLS, ignore_case=True)
+
+    # Use PathCompleter for file path autocomplete (only image files)
+    path_completer = PathCompleter(file_filter=lambda f: f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif')))
+
     if len(args) >= 2:
         tool = args[0].lower()
         image_path = args[1]
     else:
-        tool_completer = WordCompleter(list(TOOLS.keys()), ignore_case=True)
         tool = session.prompt("Tool: ", completer=tool_completer).lower()
-
-        path_completer = PathCompleter(file_filter=lambda f: f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif')))
         image_path = session.prompt("Image path: ", completer=path_completer)
 
     if tool not in TOOLS:
-        print(f"Invalid tool. Available tools: {', '.join(TOOLS.keys())}")
+        print(f"Invalid tool. Available tools: {', '.join(TOOLS)}")
         return
 
     process_image(tool, image_path)

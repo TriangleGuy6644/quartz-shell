@@ -4,22 +4,16 @@ import datetime
 import importlib
 import glob
 import json
-from prompt_toolkit import PromptSession
-from prompt_toolkit.completion import WordCompleter
-from prompt_toolkit.formatted_text import HTML
+from prompt_toolkit import PromptSession, print_formatted_text, HTML
+from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.styles import Style
 from prompt_toolkit.lexers import Lexer
+from prompt_toolkit.formatted_text import HTML
+from html import escape as escape_html
 
-# Import themes and config helpers
-from themes import THEMES, load_config, save_config
+from shell.themes import THEMES, load_config, save_config
 
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), '..', 'config', 'config.json')
-
-config = load_config()
-current_theme_name = config.get("theme", "quartz")
-theme = THEMES.get(current_theme_name, THEMES["quartz"])  # fallback theme
-
-prefix = config.get("prefix", ">>")
 
 aliases = {
     'calc': 'calculator'
@@ -35,15 +29,69 @@ def list_available_gems():
     ]
     return commands
 
+# Special subcommands for image gem:
+IMAGE_SUBCOMMANDS = ['invert', 'grayscale', 'blur', 'rotate', 'resize']
+
 def get_all_commands():
-    builtin_cmds = ['help', '?', 'exit', 'quit', 'clear', 'config', 'theme']
+    builtin_cmds = ['help', '?', 'exit', 'quit', 'clear', 'config', 'theme', 'image']
     return builtin_cmds + list(aliases.keys()) + list_available_gems()
 
-completer = WordCompleter(get_all_commands(), ignore_case=True)
+class QuartzCompleter(Completer):
+    def get_completions(self, document, complete_event):
+        text_before_cursor = document.text_before_cursor.lstrip()
+        parts = text_before_cursor.split()
 
-style = Style.from_dict(theme)
+        # If starting the command (first word)
+        if len(parts) == 0 or (len(parts) == 1 and not text_before_cursor.endswith(' ')):
+            # Complete main commands + aliases + gems
+            for cmd in get_all_commands():
+                if cmd.startswith(parts[0] if parts else ''):
+                    yield Completion(cmd, start_position=-len(parts[0]) if parts else 0)
+        elif parts[0].lower() == 'image':
+            # If inside image command, complete image subcommands or file paths
+            if len(parts) == 1:
+                # Complete image subcommands
+                for sub in IMAGE_SUBCOMMANDS:
+                    if sub.startswith(''):
+                        yield Completion(sub, start_position=0)
+            elif len(parts) == 2:
+                # Complete image subcommands filtered by user input
+                for sub in IMAGE_SUBCOMMANDS:
+                    if sub.startswith(parts[1]):
+                        yield Completion(sub, start_position=-len(parts[1]))
+            elif len(parts) == 3:
+                # Complete file path for third arg (image path)
+                # We'll do simple filename completion from current directory
+                prefix = parts[2]
+                dirname = os.path.dirname(prefix) or '.'
+                base = os.path.basename(prefix)
+                try:
+                    for fname in os.listdir(dirname):
+                        if fname.startswith(base):
+                            full_path = os.path.join(dirname, fname)
+                            display = fname + ('/' if os.path.isdir(full_path) else '')
+                            yield Completion(display, start_position=-len(base))
+                except Exception:
+                    pass
+        else:
+            # For other commands, no special completion for now
+            pass
 
-session = PromptSession(completer=completer, style=style)
+config = load_config()
+prefix = config.get("prefix", ">>")
+current_theme_name = config.get("theme", "quartz")
+current_theme = THEMES.get(current_theme_name, THEMES["quartz"])
+
+style = Style.from_dict({
+    'prefix': current_theme['prefix'],
+    'input': current_theme['input'],
+    'completion-menu.completion': current_theme['completion-menu.completion'],
+    'completion-menu.completion.current': current_theme['completion-menu.completion.current'],
+    'completion-menu.meta': current_theme['completion-menu.meta'],
+    'completion-menu.meta.completion.current': current_theme['completion-menu.meta.completion.current'],
+})
+
+session = PromptSession(completer=QuartzCompleter(), style=style)
 
 class InputLexer(Lexer):
     def lex_document(self, document):
@@ -52,42 +100,37 @@ class InputLexer(Lexer):
             return [('class:input', text)]
         return get_line
 
-def hex_to_rgb(hex_color):
-    hex_color = hex_color.lstrip('#')
-    r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
-    return f"{r};{g};{b}"
+def get_colored_prompt():
+    # Just prefix text colored by theme
+    return HTML(f'<prefix>{prefix} </prefix>')
 
 def printbanner():
     banner_path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'banner.txt')
     try:
         with open(banner_path, 'r', encoding='utf-8') as f:
             banner_text = f.read()
-            color_code = theme.get('banner', '#40e0d0')
-            rgb = hex_to_rgb(color_code)
-            print(f"\033[38;2;{rgb}m{banner_text}\033[0m")
+        color = current_theme.get('banner', '#40e0d0')
+        safe_text = escape_html(banner_text)
+        print_formatted_text(HTML(f'<ansifg="{color}">{safe_text}</ansifg>'))
     except FileNotFoundError:
-        print(f"\033[91mBanner not found. Please ensure the file exists at: {banner_path}\033[0m")
+        print_formatted_text(HTML(f'<ansired>Banner not found. Please ensure the file exists at: {banner_path}</ansired>'))
 
 def get_greeting():
     hour = datetime.datetime.now().hour
     user = getpass.getuser()
 
+    greeting_color = current_theme.get('greeting', '#40e0d0')
+
     if 5 <= hour < 12:
-        greet = "Good Morning"
+        greeting = "Good Morning"
     elif 12 <= hour < 17:
-        greet = "Good Afternoon"
+        greeting = "Good Afternoon"
     elif 17 <= hour < 21:
-        greet = "Good Evening"
+        greeting = "Good Evening"
     else:
-        greet = "Good Night"
+        greeting = "Good Night"
 
-    color_code = theme.get('greeting', '#40e0d0')
-    rgb = hex_to_rgb(color_code)
-
-    return f"\033[38;2;{rgb}m{greet}\033[0m, \033[1m{user}\033[0m! \nWelcome back to \033[38;2;{rgb}mQuartz Shell\033[0m!\nType \033[1;96m'?' \033[0mfor commands."
-
-def get_colored_prompt():
-    return HTML(f'<prefix>{prefix}</prefix> ')
+    return HTML(f'<ansifg="{greeting_color}">{greeting}</ansifg>, <b>{escape_html(user)}</b>!\nWelcome back to <ansifg="{greeting_color}">Quartz Shell</ansifg>!\nType <b><ansicyan>?</ansicyan></b> for commands.')
 
 def parse_command(line):
     parts = line.strip().split()
@@ -98,15 +141,15 @@ def parse_command(line):
     return cmd, args
 
 def dispatch_command(cmd, args):
-    global prefix, theme, style, session
+    global prefix, current_theme_name, current_theme, style, session
 
-    cmd = aliases.get(cmd, cmd)
+    cmd = aliases.get(cmd, cmd)  # support aliases
 
     if cmd in ('exit', 'quit', 'bye', 'nomoreshellpls'):
-        print("\033[92mGoodbye!\033[0m")
+        print_formatted_text(HTML('<ansigreen>Goodbye!</ansigreen>'))
         return False
     elif cmd in ('help', 'h', 'cmds', 'commands', '?'):
-        print("\033[1;96mCommands:\033[0m help, exit, clear, config, theme, plus all gems...")
+        print_formatted_text(HTML('<b><ansicyan>Commands:</ansicyan></b> help, exit, clear, config, theme, plus all gems...'))
     elif cmd == 'clear':
         os.system('cls' if os.name == 'nt' else 'clear')
     elif cmd == '':
@@ -116,27 +159,39 @@ def dispatch_command(cmd, args):
             gem_module = importlib.import_module(f'gems.{cmd}')
             gem_module.main(args)
 
-            # Reload config after config or theme commands
+            # reload config if config or theme changed
             if cmd in ('config', 'theme'):
                 new_cfg = load_config()
+                # Update prefix
                 prefix = new_cfg.get("prefix", prefix)
-                current_theme_name = new_cfg.get("theme", current_theme_name)
-                theme = THEMES.get(current_theme_name, THEMES["quartz"])
-                # update style and session with new theme
-                style = Style.from_dict(theme)
-                session.style = style
+                # Update theme and style
+                new_theme_name = new_cfg.get("theme", current_theme_name)
+                if new_theme_name != current_theme_name:
+                    current_theme_name = new_theme_name
+                    current_theme = THEMES.get(current_theme_name, THEMES["quartz"])
+                    style = Style.from_dict({
+                        'prefix': current_theme['prefix'],
+                        'input': current_theme['input'],
+                        'completion-menu.completion': current_theme['completion-menu.completion'],
+                        'completion-menu.completion.current': current_theme['completion-menu.completion.current'],
+                        'completion-menu.meta': current_theme['completion-menu.meta'],
+                        'completion-menu.meta.completion.current': current_theme['completion-menu.meta.completion.current'],
+                    })
+                    session.style = style
 
         except ModuleNotFoundError:
-            print(f"\033[91mCommand '{cmd}' not found. Type '?' for help.\033[0m")
+            print_formatted_text(HTML(f'<ansired>Command \'{cmd}\' not found. Type \'?\' for help.</ansired>'))
         except AttributeError:
-            print(f"\033[91mGem '{cmd}' does not have a main function. Please check the gem implementation.\033[0m")
+            print_formatted_text(HTML(f'<ansired>Gem \'{cmd}\' does not have a main() function. Check gem implementation.</ansired>'))
         except Exception as e:
-            print(f"\033[91mAn error occurred while executing '{cmd}': {e}\033[0m")
+            print_formatted_text(HTML(f'<ansired>Error while executing \'{cmd}\': {escape_html(str(e))}</ansired>'))
     return True
+
 
 def shell_loop():
     printbanner()
-    print(get_greeting())
+    print_formatted_text(get_greeting())
+
     running = True
     while running:
         try:
@@ -146,9 +201,9 @@ def shell_loop():
                 continue
             running = dispatch_command(cmd, args)
         except KeyboardInterrupt:
-            print("\n\033[93mInterrupted. Type 'exit' to quit.\033[0m")
+            print_formatted_text(HTML('\n<ansiyellow>Interrupted. Type \'exit\' to quit.</ansiyellow>'))
         except EOFError:
-            print("\n\033[93mEOF received. Exiting.\033[0m")
+            print_formatted_text(HTML('\n<ansiyellow>EOF received. Exiting.</ansiyellow>'))
             break
 
 if __name__ == "__main__":
