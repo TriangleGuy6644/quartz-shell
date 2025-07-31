@@ -11,7 +11,7 @@ from prompt_toolkit.styles import Style
 from prompt_toolkit.lexers import Lexer
 
 # Import themes and config helpers
-from themes import THEMES, load_config, save_config
+from .themes import THEMES, load_config, save_config
 
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), '..', 'config', 'config.json')
 
