@@ -14,7 +14,7 @@ from prompt_toolkit.lexers import Lexer
 from .themes import THEMES, load_config, save_config
 
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), '..', 'config', 'config.json')
-
+global current_theme_name
 config = load_config()
 current_theme_name = config.get("theme", "quartz")
 theme = THEMES.get(current_theme_name, THEMES["quartz"])  # fallback theme
@@ -98,7 +98,7 @@ def parse_command(line):
     return cmd, args
 
 def dispatch_command(cmd, args):
-    global prefix, theme, style, session
+    global prefix, theme, style, session, current_theme_name
 
     cmd = aliases.get(cmd, cmd)
 
@@ -116,13 +116,11 @@ def dispatch_command(cmd, args):
             gem_module = importlib.import_module(f'gems.{cmd}')
             gem_module.main(args)
 
-            # Reload config after config or theme commands
             if cmd in ('config', 'theme'):
                 new_cfg = load_config()
                 prefix = new_cfg.get("prefix", prefix)
-                current_theme_name = new_cfg.get("theme", current_theme_name)
+                current_theme_name = new_cfg.get("theme", "quartz")
                 theme = THEMES.get(current_theme_name, THEMES["quartz"])
-                # update style and session with new theme
                 style = Style.from_dict(theme)
                 session.style = style
 
@@ -133,6 +131,7 @@ def dispatch_command(cmd, args):
         except Exception as e:
             print(f"\033[91mAn error occurred while executing '{cmd}': {e}\033[0m")
     return True
+
 
 def shell_loop():
     printbanner()
