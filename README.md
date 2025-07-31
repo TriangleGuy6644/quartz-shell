@@ -44,7 +44,7 @@ pip install -r requirements.txt
 ### 2. Run the shell
 
 ```bash
-python main.py
+python -m quartz.py
 ```
 
 ---
