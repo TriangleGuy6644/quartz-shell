@@ -1,4 +1,4 @@
-# Quartz Shell 🪞🧠
+# Quartz Shell 🪞
 
 Quartz Shell is a modular Python-based command shell with support for plug-in-like utilities ("gems") such as calculators, image tools, and system utilities. It features themes, command autocompletion, and a customizable prompt.
 
