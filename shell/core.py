@@ -21,24 +21,31 @@ theme = THEMES.get(current_theme_name, THEMES["quartz"])  # fallback theme
 
 prefix = config.get("prefix", ">>")
 
-aliases = {
-    'calc': 'calculator'
-}
+# Dynamic alias loader from gems
+aliases = {}  # maps alias -> gem_name
 
 def list_available_gems():
     gems_path = os.path.join(os.path.dirname(__file__), '..', 'gems')
     gem_files = glob.glob(os.path.join(gems_path, '*.py'))
-    commands = [
-        os.path.splitext(os.path.basename(f))[0]
-        for f in gem_files
-        if not os.path.basename(f).startswith('_')
-    ]
-    return commands
+    gem_names = []
+    for f in gem_files:
+        name = os.path.splitext(os.path.basename(f))[0]
+        if not name.startswith('_'):
+            gem_names.append(name)
+            try:
+                mod = importlib.import_module(f'gems.{name}')
+                for alias in getattr(mod, 'ALIASES', []):
+                    aliases[alias] = name
+            except Exception as e:
+                print(f"\033[91m[Alias Load Error]\033[0m gem '{name}': {e}")
+    return gem_names
 
 def get_all_commands():
     builtin_cmds = ['help', '?', 'exit', 'quit', 'clear', 'config', 'theme']
+    # aliases keys are the alias commands, gem_names are actual gem commands
     return builtin_cmds + list(aliases.keys()) + list_available_gems()
 
+# Initialize completer with commands (will include aliases and gems)
 completer = WordCompleter(get_all_commands(), ignore_case=True)
 
 style = Style.from_dict(theme)
@@ -70,7 +77,8 @@ def printbanner():
 
 def get_greeting():
     hour = datetime.datetime.now().hour
-    user = getpass.getuser()
+    config = load_config()
+    user = config.get("user", getpass.getuser())  # Use config value or fallback
 
     if 5 <= hour < 12:
         greet = "Good Morning"
@@ -100,13 +108,20 @@ def parse_command(line):
 def dispatch_command(cmd, args):
     global prefix, theme, style, session, current_theme_name
 
+    # Check if cmd is an alias, replace with real gem name
     cmd = aliases.get(cmd, cmd)
 
     if cmd in ('exit', 'quit', 'bye', 'nomoreshellpls'):
         print("\033[92mGoodbye!\033[0m")
         return False
     elif cmd in ('help', 'h', 'cmds', 'commands', '?'):
-        print("\033[1;96mCommands:\033[0m help, exit, clear, config, theme, plus all gems...")
+        # Dynamically get gems and aliases for help listing
+        gems = list_available_gems()
+        alias_list = sorted(aliases.keys())
+        print("\033[1;96mCommands:\033[0m help, exit, clear, config, theme, plus all gems:")
+        print(f"  Gems: {', '.join(sorted(gems))}")
+        if alias_list:
+            print(f"  Aliases: {', '.join(alias_list)}")
     elif cmd == 'clear':
         os.system('cls' if os.name == 'nt' else 'clear')
     elif cmd == '':
@@ -116,14 +131,14 @@ def dispatch_command(cmd, args):
             gem_module = importlib.import_module(f'gems.{cmd}')
             gem_module.main(args)
 
+            # Reload config after config or theme commands
             if cmd in ('config', 'theme'):
                 new_cfg = load_config()
                 prefix = new_cfg.get("prefix", prefix)
-                current_theme_name = new_cfg.get("theme", "quartz")
+                current_theme_name = new_cfg.get("theme", current_theme_name)
                 theme = THEMES.get(current_theme_name, THEMES["quartz"])
                 style = Style.from_dict(theme)
                 session.style = style
-
         except ModuleNotFoundError:
             print(f"\033[91mCommand '{cmd}' not found. Type '?' for help.\033[0m")
         except AttributeError:
